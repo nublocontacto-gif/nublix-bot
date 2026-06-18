@@ -35,6 +35,11 @@ server.listen(3000, () => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 });
 
+// Keepalive — ping cada 10 minutos para no dormirse en Render
+setInterval(() => {
+  fetch('https://nublix-bot.onrender.com').catch(() => {});
+}, 600000);
+
 async function preguntarClaude(from, texto) {
   if (!historiales[from]) historiales[from] = [];
   historiales[from].push({ role: 'user', content: texto });
