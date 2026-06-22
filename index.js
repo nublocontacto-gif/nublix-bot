@@ -2,6 +2,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, download
 const { Boom } = require('@hapi/boom');
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const FormData = require('form-data');
 
@@ -46,12 +47,25 @@ setInterval(() => {
 
 async function transcribirAudio(buffer) {
   if (!GROQ_API_KEY) {
-    console.log('Sin GROQ_API_KEY — no se puede transcribir');
+    console.log('[transcribirAudio] Sin GROQ_API_KEY — no se puede transcribir');
     return null;
   }
+
+  const tmpDir = os.tmpdir();
+  const tmpPath = path.join(tmpDir, `audio_${Date.now()}.ogg`);
+
   try {
-    const tmpPath = path.join('/tmp', `audio_${Date.now()}.ogg`);
+    console.log(`[transcribirAudio] tmpDir=${tmpDir} bufferBytes=${buffer?.length}`);
+
+    try {
+      fs.accessSync(tmpDir, fs.constants.W_OK);
+    } catch (e) {
+      console.error(`[transcribirAudio] Sin permiso de escritura en ${tmpDir}:`, e.message);
+      return null;
+    }
+
     fs.writeFileSync(tmpPath, buffer);
+    console.log(`[transcribirAudio] Archivo temporal escrito en ${tmpPath} (${fs.statSync(tmpPath).size} bytes)`);
 
     const form = new FormData();
     form.append('file', fs.createReadStream(tmpPath), {
@@ -62,6 +76,7 @@ async function transcribirAudio(buffer) {
     form.append('language', 'es');
     form.append('response_format', 'json');
 
+    console.log('[transcribirAudio] Enviando audio a Groq...');
     const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
@@ -69,14 +84,30 @@ async function transcribirAudio(buffer) {
         ...form.getHeaders(),
       },
       body: form,
+      duplex: 'half', // requerido por undici/fetch nativo al mandar un stream como body
     });
 
-    fs.unlinkSync(tmpPath);
+    console.log(`[transcribirAudio] Groq respondió status=${res.status}`);
     const data = await res.json();
-    return data.text || null;
+
+    if (!res.ok) {
+      console.error('[transcribirAudio] Groq devolvió error:', JSON.stringify(data));
+      return null;
+    }
+
+    if (!data.text) {
+      console.error('[transcribirAudio] Respuesta sin campo "text":', JSON.stringify(data));
+      return null;
+    }
+
+    console.log(`[transcribirAudio] Transcripción OK: "${data.text}"`);
+    return data.text;
   } catch (e) {
-    console.error('Error transcribiendo audio:', e.message);
+    console.error('[transcribirAudio] Error:', e.message);
+    console.error(e.stack);
     return null;
+  } finally {
+    fs.unlink(tmpPath, () => {});
   }
 }
 
