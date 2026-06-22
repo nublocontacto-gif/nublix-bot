@@ -1,8 +1,12 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const FormData = require('form-data');
 
 const NUBLIX_PROXY = 'https://us-central1-turnify-e068f.cloudfunctions.net/nublixChat';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 let qrActual = null;
 let conectado = false;
@@ -39,6 +43,42 @@ server.listen(3000, () => {
 setInterval(() => {
   fetch('https://nublix-bot.onrender.com').catch(() => {});
 }, 600000);
+
+async function transcribirAudio(buffer) {
+  if (!GROQ_API_KEY) {
+    console.log('Sin GROQ_API_KEY — no se puede transcribir');
+    return null;
+  }
+  try {
+    const tmpPath = path.join('/tmp', `audio_${Date.now()}.ogg`);
+    fs.writeFileSync(tmpPath, buffer);
+
+    const form = new FormData();
+    form.append('file', fs.createReadStream(tmpPath), {
+      filename: 'audio.ogg',
+      contentType: 'audio/ogg',
+    });
+    form.append('model', 'whisper-large-v3');
+    form.append('language', 'es');
+    form.append('response_format', 'json');
+
+    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        ...form.getHeaders(),
+      },
+      body: form,
+    });
+
+    fs.unlinkSync(tmpPath);
+    const data = await res.json();
+    return data.text || null;
+  } catch (e) {
+    console.error('Error transcribiendo audio:', e.message);
+    return null;
+  }
+}
 
 async function preguntarClaude(from, texto) {
   if (!historiales[from]) historiales[from] = [];
@@ -93,7 +133,33 @@ async function conectar() {
     if (!msg.message || msg.key.fromMe) return;
     const from = msg.key.remoteJid;
     if (from.endsWith('@g.us')) return;
-    const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+
+    let texto = msg.message.conversation
+      || msg.message.extendedTextMessage?.text
+      || '';
+
+    // Manejar audios
+    const esAudio = msg.message.audioMessage || msg.message.pttMessage;
+    if (esAudio) {
+      console.log(`[${new Date().toLocaleTimeString()}] ${from}: [AUDIO] transcribiendo...`);
+      await sock.sendPresenceUpdate('composing', from);
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
+        const transcripcion = await transcribirAudio(buffer);
+        if (transcripcion) {
+          texto = transcripcion;
+          console.log(`[Transcripción] ${texto}`);
+        } else {
+          await sock.sendMessage(from, { text: 'No pude escuchar bien el audio 🐾 ¿Me lo podés escribir?' });
+          return;
+        }
+      } catch (e) {
+        console.error('Error descargando audio:', e.message);
+        await sock.sendMessage(from, { text: 'Tuve un problema con el audio 🐾 ¿Me lo podés escribir?' });
+        return;
+      }
+    }
+
     if (!texto.trim()) return;
 
     console.log(`[${new Date().toLocaleTimeString()}] ${from}: ${texto}`);
