@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const FormData = require('form-data');
+const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 
@@ -101,35 +102,35 @@ async function transcribirAudio(buffer) {
     form.append('language', 'es');
     form.append('response_format', 'json');
 
-    console.log('[transcribirAudio] Enviando audio a Groq...');
-    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROQ_API_KEY}`,
-        ...form.getHeaders(),
-      },
-      body: form,
-      duplex: 'half', // requerido por undici/fetch nativo al mandar un stream como body
-    });
+    console.log('[transcribirAudio] Enviando audio a Groq (axios)...');
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/audio/transcriptions',
+      form,
+      {
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          ...form.getHeaders(),
+        },
+      }
+    );
 
-    console.log(`[transcribirAudio] Groq respondió status=${res.status}`);
-    const data = await res.json();
+    console.log(`[transcribirAudio] Groq respondió status=${response.status}`);
+    const texto = response.data.text;
 
-    if (!res.ok) {
-      console.error('[transcribirAudio] Groq devolvió error:', JSON.stringify(data));
+    if (!texto) {
+      console.error('[transcribirAudio] Respuesta sin campo "text":', JSON.stringify(response.data));
       return null;
     }
 
-    if (!data.text) {
-      console.error('[transcribirAudio] Respuesta sin campo "text":', JSON.stringify(data));
-      return null;
-    }
-
-    console.log(`[transcribirAudio] Transcripción OK: "${data.text}"`);
-    return data.text;
+    console.log(`[transcribirAudio] Transcripción OK: "${texto}"`);
+    return texto;
   } catch (e) {
-    console.error('[transcribirAudio] Error:', e.message);
-    console.error(e.stack);
+    if (e.response) {
+      console.error(`[transcribirAudio] Groq devolvió error status=${e.response.status}:`, JSON.stringify(e.response.data));
+    } else {
+      console.error('[transcribirAudio] Error:', e.message);
+      console.error(e.stack);
+    }
     return null;
   } finally {
     fs.unlink(tmpPathOgg, () => {});
