@@ -5,6 +5,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const FormData = require('form-data');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('ffmpeg-static');
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const NUBLIX_PROXY = 'https://us-central1-turnify-e068f.cloudfunctions.net/nublixChat';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -45,17 +49,34 @@ setInterval(() => {
   fetch('https://nublix-bot.onrender.com').catch(() => {});
 }, 600000);
 
+function convertirAMp3(origenPath, destinoPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(origenPath)
+      .audioCodec('libmp3lame')
+      .format('mp3')
+      .on('end', resolve)
+      .on('error', reject)
+      .save(destinoPath);
+  });
+}
+
 async function transcribirAudio(buffer) {
   if (!GROQ_API_KEY) {
     console.log('[transcribirAudio] Sin GROQ_API_KEY — no se puede transcribir');
     return null;
   }
 
+  if (!buffer || buffer.length === 0) {
+    console.error('[transcribirAudio] Buffer de audio vacío — el audio no llegó con datos');
+    return null;
+  }
+
   const tmpDir = os.tmpdir();
-  const tmpPath = path.join(tmpDir, `audio_${Date.now()}.ogg`);
+  const tmpPathOgg = path.join(tmpDir, `audio_${Date.now()}.ogg`);
+  const tmpPathMp3 = path.join(tmpDir, `audio_${Date.now()}.mp3`);
 
   try {
-    console.log(`[transcribirAudio] tmpDir=${tmpDir} bufferBytes=${buffer?.length}`);
+    console.log(`[transcribirAudio] tmpDir=${tmpDir} bufferBytes=${buffer.length}`);
 
     try {
       fs.accessSync(tmpDir, fs.constants.W_OK);
@@ -64,13 +85,17 @@ async function transcribirAudio(buffer) {
       return null;
     }
 
-    fs.writeFileSync(tmpPath, buffer);
-    console.log(`[transcribirAudio] Archivo temporal escrito en ${tmpPath} (${fs.statSync(tmpPath).size} bytes)`);
+    fs.writeFileSync(tmpPathOgg, buffer);
+    console.log(`[transcribirAudio] Archivo temporal escrito en ${tmpPathOgg} (${fs.statSync(tmpPathOgg).size} bytes)`);
+
+    console.log('[transcribirAudio] Convirtiendo ogg/opus → mp3 con ffmpeg...');
+    await convertirAMp3(tmpPathOgg, tmpPathMp3);
+    console.log(`[transcribirAudio] Conversión OK: ${tmpPathMp3} (${fs.statSync(tmpPathMp3).size} bytes)`);
 
     const form = new FormData();
-    form.append('file', fs.createReadStream(tmpPath), {
-      filename: 'audio.ogg',
-      contentType: 'audio/ogg',
+    form.append('file', fs.createReadStream(tmpPathMp3), {
+      filename: 'audio.mp3',
+      contentType: 'audio/mpeg',
     });
     form.append('model', 'whisper-large-v3');
     form.append('language', 'es');
@@ -107,7 +132,8 @@ async function transcribirAudio(buffer) {
     console.error(e.stack);
     return null;
   } finally {
-    fs.unlink(tmpPath, () => {});
+    fs.unlink(tmpPathOgg, () => {});
+    fs.unlink(tmpPathMp3, () => {});
   }
 }
 
