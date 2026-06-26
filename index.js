@@ -14,6 +14,8 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const NUBLIX_PROXY = 'https://us-central1-turnify-e068f.cloudfunctions.net/nublixChat';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const MI_NUMERO = '5491178247713';
+// Los últimos 8 dígitos del número para detección robusta
+const MI_NUMERO_SUFIJO = '78247713';
 
 let qrActual = null;
 let conectado = false;
@@ -219,7 +221,7 @@ async function conectar() {
           texto = transcripcion;
           console.log(`[Transcripción] ${texto}`);
         } else {
-          const esTomi = from.replace(/\D/g, '').includes(MI_NUMERO);
+          const esTomi = from.replace(/\D/g, '').includes(MI_NUMERO_SUFIJO);
           await sock.sendMessage(from, { text: esTomi
             ? 'No pude procesar el audio, señor. ¿Podría escribirlo?'
             : 'No pude escuchar bien el audio 🐾 ¿Me lo podés escribir?' });
@@ -237,7 +239,7 @@ async function conectar() {
     await sock.sendPresenceUpdate('composing', from);
 
     // Detectar si es Tomi por el número
-    const esTomi = from.replace(/\D/g, '').includes(MI_NUMERO);
+    const esTomi = from.replace(/\D/g, '').includes(MI_NUMERO_SUFIJO);
 
     const respuesta = esTomi
       ? await preguntarJarvis(from, texto)
