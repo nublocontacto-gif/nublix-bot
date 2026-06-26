@@ -15,7 +15,7 @@ const NUBLIX_PROXY = 'https://us-central1-turnify-e068f.cloudfunctions.net/nubli
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const MI_NUMERO = '5491178247713';
 // Los últimos 8 dígitos del número para detección robusta
-const MI_NUMERO_SUFIJO = '78247713';
+const MI_NUMERO_SUFIJO = '1285767';
 
 let qrActual = null;
 let conectado = false;
